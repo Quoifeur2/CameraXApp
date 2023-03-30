@@ -14,3 +14,7 @@ dependencyResolutionManagement {
 }
 rootProject.name = "CameraXApp"
 include ':app'
+
+def opencvsdk='<path_to_opencv_android_sdk_rootdir>'
+
+include ':OpenCV'

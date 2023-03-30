@@ -1,46 +1,78 @@
 package com.example.cameraxapp
 
+
+
+import org.opencv.android.Utils
+import org.opencv.core.CvType
+import org.opencv.core.Mat
 import android.Manifest
+import android.content.ContentResolver
 import android.content.ContentValues
+import android.content.Context
 import android.content.pm.PackageManager
-import android.os.Build
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Log
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.ImageCapture
-import androidx.camera.video.Recorder
-import androidx.camera.video.Recording
-import androidx.camera.video.VideoCapture
+import androidx.camera.core.*
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.cameraxapp.databinding.ActivityMainBinding
+import java.io.OutputStream
+import java.text.SimpleDateFormat
+import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import android.widget.Toast
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.core.Preview
-import androidx.camera.core.CameraSelector
-import android.util.Log
-import androidx.camera.core.ImageCaptureException
-import java.text.SimpleDateFormat
-import java.util.Locale
 
+fun uriToMat(contentResolver: ContentResolver, uri: Uri): Mat {
+    val bitmap: Bitmap = MediaStore.Images.Media.getBitmap(contentResolver, uri)
+    val mat = Mat(bitmap.height, bitmap.width, CvType.CV_64F)
+    Utils.bitmapToMat(bitmap, mat)
+    return mat
+}
+// Function to save a Mat as a new image file in the MediaStore
+fun saveMatToMediaStore(context: Context, mat: Mat): Uri? {
+    // Create a ContentValues object to store metadata about the image
+    val values = ContentValues().apply {
+        put(MediaStore.Images.Media.DISPLAY_NAME, "theimage") // Set the display name for the image
+        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg") // Set the MIME type of the image
+        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/CameraX-Image") // Set the relative path for the image
+    }
 
+    // Get the content resolver and insert the new image into the MediaStore
+    val resolver = context.contentResolver
+    val uri: Uri? = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
 
-typealias LumaListener = (luma: Double) -> Unit
+    // Open an output stream to write the image data to the MediaStore
+    uri?.let {
+        val outputStream: OutputStream = resolver.openOutputStream(uri) ?: return null
 
+        // Convert the Mat to a Bitmap and write it to the output stream
+        val bitmap = Bitmap.createBitmap(mat.cols(), mat.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(mat, bitmap)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
+
+        outputStream.flush()
+        outputStream.close()
+    }
+
+    return uri
+}
 
 class MainActivity : AppCompatActivity() {
+
     private lateinit var viewBinding: ActivityMainBinding
 
     private var imageCapture: ImageCapture? = null
 
-    private var videoCapture: VideoCapture<Recorder>? = null
-    private var recording: Recording? = null
-
     private lateinit var cameraExecutor: ExecutorService
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        System.loadLibrary("opencv_java4")
         super.onCreate(savedInstanceState)
         viewBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
@@ -62,6 +94,7 @@ class MainActivity : AppCompatActivity() {
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<String>, grantResults:
         IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
                 startCamera()
@@ -83,11 +116,9 @@ class MainActivity : AppCompatActivity() {
         val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US)
             .format(System.currentTimeMillis())
         val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if(Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/CameraX-Image")
-            }
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name) //nom
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg") //type
+            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/CameraX-Image") //Path
         }
 
         // Create output options object which contains file + metadata
@@ -96,6 +127,7 @@ class MainActivity : AppCompatActivity() {
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                 contentValues)
             .build()
+
 
         // Set up image capture listener, which is triggered after photo has
         // been taken
@@ -107,11 +139,13 @@ class MainActivity : AppCompatActivity() {
                     Log.e(TAG, "Photo capture failed: ${exc.message}", exc)
                 }
 
-                override fun
-                        onImageSaved(output: ImageCapture.OutputFileResults){
-                    val msg = "Photo capture succeeded: ${output.savedUri}"
-                    Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT).show()
-                    Log.d(TAG, msg)
+                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    // Convertir la photo en un objet Mat puis la découper et la sauvgarder dans la gallerie
+                    val mat = uriToMat(contentResolver, outputFileResults.savedUri!!)
+                    val matcrop = Card_Finder.card(mat)
+                    val uri = matcrop?.let { saveMatToMediaStore(this@MainActivity, it) }
+                    Log.d(TAG, "Photo capture succeeded: $uri")
+
                 }
             }
         )
@@ -155,7 +189,8 @@ class MainActivity : AppCompatActivity() {
 
     }
 
-    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
+
+        private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(
             baseContext, it) == PackageManager.PERMISSION_GRANTED
     }
@@ -164,6 +199,7 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         cameraExecutor.shutdown()
     }
+
 
     companion object {
         private const val TAG = "CameraXApp"
@@ -174,9 +210,6 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.CAMERA,
                 Manifest.permission.RECORD_AUDIO
             ).apply {
-                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-                    add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                }
             }.toTypedArray()
     }
 }
