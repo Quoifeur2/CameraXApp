@@ -14,4 +14,4 @@
 -- Detecting CXX compile features - done
 -- Configuring done
 -- Generating done
--- Build files have been written to: C:/Users/cleme/AndroidStudioProjects/CameraXApp/OpenCV/.cxx/Debug/6m6dc465/x86
+-- Build files have been written to: C:/Users/cleme/AndroidStudioProjects/CameraXAppV2/OpenCV/.cxx/Debug/6m6dc465/x86
